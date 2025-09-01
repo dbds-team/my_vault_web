@@ -1,0 +1,225 @@
+name: Build Private Vault Web
+
+on:
+  push:
+    branches: [build-private]
+  workflow_dispatch:
+    inputs:
+      vault_version:
+        description: 'Client version to build (e.g., v2025.8.3)'
+        required: false
+        default: 'v2025.8.3'
+
+env:
+  # Use our private client repository
+  VAULT_VERSION: ${{ github.event.inputs.vault_version || 'v2025.8.3' }}
+
+jobs:
+  build-web-vault:
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+    
+    steps:
+      - name: Checkout vault web builds repository
+        uses: actions/checkout@v4
+      
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: '**/package-lock.json'
+      
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y git curl build-essential
+      
+      - name: Setup build environment
+        run: |
+          echo "VAULT_VERSION=${VAULT_VERSION}" > .build_env
+          echo "VAULT_FOLDER=web-vault" >> .build_env
+          echo "CHECKOUT_TAGS=true" >> .build_env
+          echo "OUTPUT_FOLDER=builds" >> .build_env
+          
+          echo "Build configuration:"
+          cat .build_env
+      
+      - name: Checkout web vault from private client repository
+        run: |
+          echo "🔄 Checking out web vault from private repository..."
+          ./scripts/checkout_web_vault.sh
+          
+          echo "✅ Checkout completed, checking status:"
+          cd web-vault
+          echo "Current branch/tag: $(git describe --all || git rev-parse HEAD)"
+          echo "Remote URL: $(git remote get-url vaultwarden)"
+          cd ..
+      
+      - name: Apply Vaultwarden patches
+        run: |
+          echo "🔧 Applying Vaultwarden-specific patches..."
+          
+          # Apply patches if they exist
+          if [ -d "patches" ] && [ "$(ls -A patches/)" ]; then
+            echo "Found patches to apply:"
+            ls -la patches/
+            
+            cd web-vault
+            for patch in ../patches/*.patch; do
+              if [ -f "$patch" ]; then
+                echo "Applying patch: $(basename $patch)"
+                git apply "$patch" || echo "Warning: Failed to apply $patch"
+              fi
+            done
+            cd ..
+          else
+            echo "No patches found in patches/ directory"
+          fi
+      
+      - name: Build web vault
+        run: |
+          echo "🏗️ Building web vault..."
+          ./scripts/build_web_vault.sh
+          
+          echo "✅ Build completed, checking output:"
+          if [ -d "web-vault/apps/web/build" ]; then
+            echo "Build output size:"
+            du -sh web-vault/apps/web/build
+            echo "Build contents:"
+            ls -la web-vault/apps/web/build/ | head -20
+          else
+            echo "❌ Build output not found!"
+            exit 1
+          fi
+      
+      - name: Create web vault archive
+        run: |
+          echo "📦 Creating web vault archive..."
+          ./scripts/tar_web_vault.sh
+          
+          echo "✅ Archive created:"
+          ls -la builds/
+      
+      - name: Generate version info
+        id: version
+        run: |
+          BUILD_DATE=$(date -u +"%Y%m%d.%H%M")
+          COMMIT_HASH=$(echo $GITHUB_SHA | head -c 7)
+          VERSION="v${BUILD_DATE}-${COMMIT_HASH}"
+          
+          echo "tag=${VERSION}" >> $GITHUB_OUTPUT
+          echo "date=$(date -u +"%Y-%m-%d %H:%M:%S UTC")" >> $GITHUB_OUTPUT
+          echo "vault_version=${VAULT_VERSION}" >> $GITHUB_OUTPUT
+          
+          # Get archive info
+          if ls builds/*.tar.gz 1> /dev/null 2>&1; then
+            ARCHIVE_PATH=$(ls builds/*.tar.gz | head -1)
+            ARCHIVE_SIZE=$(ls -lh "$ARCHIVE_PATH" | awk '{print $5}')
+            ARCHIVE_NAME=$(basename "$ARCHIVE_PATH")
+            echo "archive_size=${ARCHIVE_SIZE}" >> $GITHUB_OUTPUT
+            echo "archive_name=${ARCHIVE_NAME}" >> $GITHUB_OUTPUT
+          fi
+      
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: vault-web-build
+          path: |
+            builds/*.tar.gz
+            builds/*.tar.gz.sha256sum
+          if-no-files-found: warn
+      
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.version.outputs.tag }}
+          name: "Vault Web (Private) ${{ steps.version.outputs.tag }}"
+          draft: false
+          prerelease: false
+          body: |
+            ## 🌐 Bitwarden Web Vault (Private Build) ${{ steps.version.outputs.tag }}
+            
+            **Build Date:** ${{ steps.version.outputs.date }}
+            **Client Version:** ${{ steps.version.outputs.vault_version }}
+            **Commit:** `${{ github.sha }}`
+            **Branch:** `build-private`
+            **Archive Size:** ${{ steps.version.outputs.archive_size }}
+            
+            ### ✨ Features
+            - ✅ **100% Private Source** - Built from your private client repository
+            - ✅ **No Official Dependencies** - Uses [dbds-team/my_bitwarden_client](https://github.com/dbds-team/my_bitwarden_client)
+            - ✅ **Vaultwarden Compatible** - Optimized for self-hosted Vaultwarden
+            - ✅ **No Telemetry** - Privacy-focused build
+            - ✅ **Full Audit Trail** - Complete build transparency
+            
+            ### 📦 Downloads
+            
+            #### 🌐 Web Vault Archive
+            - `${{ steps.version.outputs.archive_name }}` - Complete web vault (~${{ steps.version.outputs.archive_size }})
+            - `*.sha256sum` - Checksum file for verification
+            
+            ### 🚀 Installation
+            
+            #### For Vaultwarden Docker:
+            ```bash
+            # Download and extract
+            wget https://github.com/dbds-team/my_vault_web/releases/download/${{ steps.version.outputs.tag }}/${{ steps.version.outputs.archive_name }}
+            tar -xzf ${{ steps.version.outputs.archive_name }}
+            
+            # Use with Vaultwarden
+            docker run -d --name vaultwarden \\
+              -v /path/to/extracted/web-vault:/web-vault \\
+              -v /path/to/vw-data:/data \\
+              -p 80:80 \\
+              vaultwarden/server:latest
+            ```
+            
+            #### For Standalone Web Server:
+            ```bash
+            # Extract and serve
+            tar -xzf ${{ steps.version.outputs.archive_name }}
+            cd web-vault
+            
+            # Serve with any web server
+            python3 -m http.server 8080
+            # or
+            npx serve -p 8080 .
+            ```
+            
+            ### 🔒 Security Verification
+            
+            **Verify SHA256:**
+            ```bash
+            sha256sum -c ${{ steps.version.outputs.archive_name }}.sha256sum
+            ```
+            
+            **Source Verification:**
+            - Client Source: [dbds-team/my_bitwarden_client](https://github.com/dbds-team/my_bitwarden_client)
+            - Build Scripts: [dbds-team/my_vault_web](https://github.com/dbds-team/my_vault_web)
+            - Build Logs: [GitHub Actions](https://github.com/dbds-team/my_vault_web/actions)
+            
+            ### ⚙️ Configuration
+            
+            This web vault is configured to work with:
+            - ✅ **Vaultwarden** (recommended)
+            - ✅ **Self-hosted Bitwarden** 
+            - ❌ **Official Bitwarden Cloud** (not compatible)
+            
+            ### 📝 Usage Notes
+            
+            1. **Server Configuration**: Point your Vaultwarden to use this web vault
+            2. **Updates**: Download new releases to update the web interface
+            3. **Compatibility**: Built from client version ${{ steps.version.outputs.vault_version }}
+            4. **Privacy**: No data sent to official Bitwarden servers
+            
+            ### 🆚 Differences from Official
+            
+            - ✅ **No Telemetry**: Completely private
+            - ✅ **Custom Branding**: Vaultwarden-optimized
+            - ✅ **Self-hosted Focus**: No cloud dependencies
+            - ⚠️ **Support**: Use community channels, not official Bitwarden support
+          files: |
+            builds/*.tar.gz
+            builds/*.sha256sum
