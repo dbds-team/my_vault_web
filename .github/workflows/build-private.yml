@@ -28,8 +28,6 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '20'
-          cache: 'npm'
-          cache-dependency-path: '**/package-lock.json'
       
       - name: Install system dependencies
         run: |
@@ -49,13 +47,37 @@ jobs:
       - name: Checkout web vault from private client repository
         run: |
           echo "🔄 Checking out web vault from private repository..."
+          
+          # Make scripts executable
+          chmod +x scripts/*.sh
+          
+          # Run checkout with more verbose output
+          set -x
           ./scripts/checkout_web_vault.sh
+          set +x
           
           echo "✅ Checkout completed, checking status:"
-          cd web-vault
-          echo "Current branch/tag: $(git describe --all || git rev-parse HEAD)"
-          echo "Remote URL: $(git remote get-url vaultwarden)"
-          cd ..
+          if [ -d "web-vault" ]; then
+            cd web-vault
+            echo "Current branch/tag: $(git describe --all 2>/dev/null || git rev-parse HEAD)"
+            echo "Remote URL: $(git remote get-url vaultwarden 2>/dev/null || echo 'No remote found')"
+            echo "Directory contents:"
+            ls -la | head -10
+            
+            # Check if this is the web app directory
+            if [ -d "apps/web" ]; then
+              echo "✅ Found web app directory"
+              ls -la apps/web/ | head -10
+            else
+              echo "❌ Web app directory not found"
+              echo "Available directories:"
+              find . -maxdepth 2 -type d | head -20
+            fi
+            cd ..
+          else
+            echo "❌ web-vault directory not created"
+            exit 1
+          fi
       
       - name: Apply Vaultwarden patches
         run: |
@@ -81,7 +103,22 @@ jobs:
       - name: Build web vault
         run: |
           echo "🏗️ Building web vault..."
+          
+          # Check if build script exists
+          if [ ! -f "scripts/build_web_vault.sh" ]; then
+            echo "❌ Build script not found!"
+            echo "Available scripts:"
+            ls -la scripts/
+            exit 1
+          fi
+          
+          # Make sure build script is executable
+          chmod +x scripts/build_web_vault.sh
+          
+          # Run build with more verbose output
+          set -x
           ./scripts/build_web_vault.sh
+          set +x
           
           echo "✅ Build completed, checking output:"
           if [ -d "web-vault/apps/web/build" ]; then
@@ -89,8 +126,16 @@ jobs:
             du -sh web-vault/apps/web/build
             echo "Build contents:"
             ls -la web-vault/apps/web/build/ | head -20
+          elif [ -d "web-vault/build" ]; then
+            echo "Found build in root web-vault directory:"
+            du -sh web-vault/build
+            ls -la web-vault/build/ | head -20
           else
             echo "❌ Build output not found!"
+            echo "Searching for build directories:"
+            find web-vault -name "build" -type d 2>/dev/null || echo "No build directories found"
+            echo "Searching for dist directories:"
+            find web-vault -name "dist" -type d 2>/dev/null || echo "No dist directories found"
             exit 1
           fi
       
