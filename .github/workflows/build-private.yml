@@ -6,13 +6,14 @@ on:
   workflow_dispatch:
     inputs:
       vault_version:
-        description: 'Client version to build (e.g., web-v2025.8.1 or build-private)'
+        description: 'Client version to build (e.g., web-v2025.4.1 or build-private)'
         required: false
-        default: 'web-v2025.8.1'
+        default: 'web-v2025.4.1'
 
 env:
   # Use our private client repository  
-  VAULT_VERSION: ${{ github.event.inputs.vault_version || 'web-v2025.8.1' }}
+  # Using v2025.4.1 which has corresponding Vaultwarden patches
+  VAULT_VERSION: ${{ github.event.inputs.vault_version || 'web-v2025.4.1' }}
 
 jobs:
   build-web-vault:
@@ -107,8 +108,12 @@ jobs:
             echo "Available patches:"
             ls -la patches/*.patch 2>/dev/null | tail -10 || echo "No patches in patches/ directory"
             echo ""
-            echo "Note: Building without Vaultwarden patches may cause compatibility issues"
-            echo "Consider using a version with available patches or creating a new patch"
+            echo "Note: Building without Vaultwarden patches will cause compatibility issues:"
+            echo "  - Official code doesn't know about '/web-vault' path"
+            echo "  - API endpoints point to api.bitwarden.com"
+            echo "  - Contains unnecessary billing/payment features"
+            echo ""
+            echo "Recommended versions with patches: v2025.4.1, v2025.3.1, v2025.2.2"
           fi
       
       - name: Build web vault
