@@ -85,21 +85,30 @@ jobs:
         run: |
           echo "🔧 Applying Vaultwarden-specific patches..."
           
-          # Apply patches if they exist
-          if [ -d "patches" ] && [ "$(ls -A patches/)" ]; then
-            echo "Found patches to apply:"
-            ls -la patches/
-            
+          # Extract version number from VAULT_VERSION (remove 'web-' prefix if present)
+          VERSION_TAG="${VAULT_VERSION#web-}"
+          echo "Looking for patch for version: ${VERSION_TAG}"
+          
+          # Check if a specific patch exists for this version
+          PATCH_FILE="patches/${VERSION_TAG}.patch"
+          
+          if [ -f "$PATCH_FILE" ]; then
+            echo "✅ Found specific patch for ${VERSION_TAG}"
             cd web-vault
-            for patch in ../patches/*.patch; do
-              if [ -f "$patch" ]; then
-                echo "Applying patch: $(basename $patch)"
-                git apply "$patch" || echo "Warning: Failed to apply $patch"
-              fi
-            done
+            echo "Applying patch: $(basename $PATCH_FILE)"
+            if git apply "../$PATCH_FILE"; then
+              echo "✅ Patch applied successfully"
+            else
+              echo "❌ Failed to apply patch, continuing anyway..."
+            fi
             cd ..
           else
-            echo "No patches found in patches/ directory"
+            echo "⚠️ No specific patch found for ${VERSION_TAG}"
+            echo "Available patches:"
+            ls -la patches/*.patch 2>/dev/null | tail -10 || echo "No patches in patches/ directory"
+            echo ""
+            echo "Note: Building without Vaultwarden patches may cause compatibility issues"
+            echo "Consider using a version with available patches or creating a new patch"
           fi
       
       - name: Build web vault
