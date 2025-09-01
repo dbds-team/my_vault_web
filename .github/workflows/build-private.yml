@@ -6,13 +6,13 @@ on:
   workflow_dispatch:
     inputs:
       vault_version:
-        description: 'Client version to build (e.g., v2025.8.3)'
+        description: 'Client version to build (e.g., web-v2025.8.1 or build-private)'
         required: false
-        default: 'v2025.8.3'
+        default: 'web-v2025.8.1'
 
 env:
-  # Use our private client repository
-  VAULT_VERSION: ${{ github.event.inputs.vault_version || 'v2025.8.3' }}
+  # Use our private client repository  
+  VAULT_VERSION: ${{ github.event.inputs.vault_version || 'web-v2025.8.1' }}
 
 jobs:
   build-web-vault:
@@ -43,6 +43,8 @@ jobs:
           
           echo "Build configuration:"
           cat .build_env
+          echo ""
+          echo "Using vault version: ${VAULT_VERSION}"
       
       - name: Checkout web vault from private client repository
         run: |
